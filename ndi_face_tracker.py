@@ -4,6 +4,7 @@ import time
 import json
 import asyncio
 import threading
+import base64
 from dataclasses import dataclass, field
 from typing import Dict, Optional, Set
 from ultralytics import YOLO
@@ -128,6 +129,10 @@ class NDIFaceTracker:
         # WebSocket server
         self.ws_server = WebSocketServer(port=websocket_port)
 
+        # Face snapshot settings
+        self.last_snapshot_time = -10.0  # Start immediately
+        self.snapshot_interval = 10.0  # seconds
+
     def find_and_connect(self) -> bool:
         """Find NDI source and connect to it."""
         print(f"Looking for NDI source '{self.source_name}'...")
@@ -208,6 +213,7 @@ class NDIFaceTracker:
             track_ids = results[0].boxes.id.cpu().numpy().astype(int)
 
             for bbox, track_id in zip(boxes, track_ids):
+                track_id = int(track_id)  # Convert to Python int
                 x1, y1, x2, y2 = bbox
                 current_frame_ids.add(track_id)
 
@@ -223,6 +229,9 @@ class NDIFaceTracker:
 
         # Send only currently visible persons via WebSocket
         self.send_tracking_data(current_frame_ids)
+
+        # Capture face snapshot every 10 seconds
+        self.capture_face_snapshot(frame, current_frame_ids)
 
         annotated_frame = self.draw_annotations(frame, current_frame_ids)
         return annotated_frame
@@ -243,43 +252,69 @@ class NDIFaceTracker:
             }
             self.ws_server.send(data)
 
+    def capture_face_snapshot(self, frame: np.ndarray, visible_ids: set):
+        """Capture circular face snapshot every 10 seconds and send via WebSocket."""
+        current_time = time.time()
+        if current_time - self.last_snapshot_time < self.snapshot_interval:
+            return
+
+        if not visible_ids:
+            return
+
+        # Find first visible person
+        for track_id in visible_ids:
+            person = self.tracked_persons.get(track_id)
+            if person:
+                x1, y1, x2, y2 = person.bbox
+                cx, cy = person.center
+                radius = max(x2 - x1, y2 - y1) // 2
+
+                # Add some padding
+                radius = int(radius * 1.2)
+
+                # Calculate crop bounds with boundary checks
+                crop_x1 = max(0, cx - radius)
+                crop_y1 = max(0, cy - radius)
+                crop_x2 = min(self.frame_width, cx + radius)
+                crop_y2 = min(self.frame_height, cy + radius)
+
+                # Crop the region
+                cropped = frame[crop_y1:crop_y2, crop_x1:crop_x2].copy()
+
+                if cropped.size == 0:
+                    continue
+
+                # Create circular mask
+                h, w = cropped.shape[:2]
+                mask = np.zeros((h, w), dtype=np.uint8)
+                center = (w // 2, h // 2)
+                mask_radius = min(w, h) // 2
+                cv2.circle(mask, center, mask_radius, 255, -1)
+
+                # Apply mask - create RGBA image with transparency
+                result = cv2.cvtColor(cropped, cv2.COLOR_BGR2BGRA)
+                result[:, :, 3] = mask
+
+                # Encode to PNG (supports transparency)
+                _, buffer = cv2.imencode('.png', result)
+                img_base64 = base64.b64encode(buffer).decode('utf-8')
+
+                # Send snapshot via WebSocket
+                snapshot_data = {
+                    "type": "face_snapshot",
+                    "timestamp": current_time,
+                    "track_id": int(track_id),
+                    "image": f"data:image/png;base64,{img_base64}"
+                }
+                self.ws_server.send(snapshot_data)
+
+                self.last_snapshot_time = current_time
+                print(f"Face snapshot captured for track ID {track_id}, size: {w}x{h}, base64 len: {len(img_base64)}")
+                break
+
     def draw_annotations(self, frame: np.ndarray, visible_ids: set) -> np.ndarray:
-        """Draw bounding boxes and info for visible tracked persons."""
-        annotated = frame.copy()
-
-        visible_count = 0
-        for track_id, person in self.tracked_persons.items():
-            if track_id not in visible_ids:
-                continue
-
-            visible_count += 1
-            x1, y1, x2, y2 = person.bbox
-            cx, cy = person.center
-
-            color = (0, 255, 0)  # Green for visible
-
-            # Draw circle around face
-            radius = max(x2 - x1, y2 - y1) // 2
-            cv2.circle(annotated, (cx, cy), radius, color, 2)
-
-            # Draw center point
-            cv2.circle(annotated, (cx, cy), 5, color, -1)
-
-            info_text = f"ID:{track_id}"
-            cv2.putText(
-                annotated, info_text,
-                (cx - 30, cy - radius - 10),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2
-            )
-
-        summary = f"Visible: {visible_count} | WS: {len(self.ws_server.clients)}"
-        cv2.putText(
-            annotated, summary,
-            (10, 30),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2
-        )
-
-        return annotated
+        """Return frame without annotations."""
+        return frame
 
     def print_coordinates(self):
         """Print coordinates of all tracked persons."""

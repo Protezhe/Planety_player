@@ -54,36 +54,52 @@
             transition: all 0.1s ease-out;
         }
 
-        #status {
+        #face-snapshot {
             position: fixed;
-            top: 10px;
+            top: 40px;
             left: 10px;
-            color: #00ff00;
-            font-family: 'Arial', sans-serif;
-            font-size: 12px;
-            background: rgba(0, 0, 0, 0.7);
-            padding: 5px 10px;
-            border-radius: 4px;
+            width: 150px;
+            height: 150px;
+            border: 3px solid #00ff00;
+            border-radius: 50%;
+            overflow: hidden;
+            background: rgba(0, 0, 0, 0.5);
+            box-shadow: 0 0 15px rgba(0, 255, 0, 0.5),
+                        0 0 30px rgba(0, 255, 0, 0.3);
             z-index: 1000;
         }
 
-        #status.disconnected {
-            color: #ff0000;
+        #face-snapshot img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
         }
 
-        #status.connecting {
-            color: #ffff00;
+        #face-snapshot-label {
+            position: fixed;
+            top: 195px;
+            left: 10px;
+            color: #00ff00;
+            font-family: 'Arial', sans-serif;
+            font-size: 11px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 3px 8px;
+            border-radius: 4px;
+            z-index: 1000;
         }
     </style>
 </head>
 <body>
-    <div id="status" class="connecting">Connecting...</div>
+    <div id="face-snapshot" style="display: none;"><img id="face-img" src="" alt="Face"></div>
+    <div id="face-snapshot-label" style="display: none;"></div>
     <div id="overlay"></div>
 
     <script>
         const WS_URL = 'ws://localhost:8765';
         const overlay = document.getElementById('overlay');
-        const status = document.getElementById('status');
+        const faceSnapshot = document.getElementById('face-snapshot');
+        const faceSnapshotImg = document.getElementById('face-img');
+        const faceSnapshotLabel = document.getElementById('face-snapshot-label');
 
         let ws = null;
         let personElements = new Map();
@@ -92,20 +108,13 @@
         function connect() {
             if (ws && ws.readyState === WebSocket.OPEN) return;
 
-            status.textContent = 'Connecting...';
-            status.className = 'connecting';
-
             ws = new WebSocket(WS_URL);
 
             ws.onopen = () => {
-                status.textContent = 'Connected';
-                status.className = '';
                 console.log('WebSocket connected');
             };
 
             ws.onclose = () => {
-                status.textContent = 'Disconnected - Reconnecting...';
-                status.className = 'disconnected';
                 console.log('WebSocket disconnected');
 
                 // Clear all circles on disconnect
@@ -128,6 +137,8 @@
                     const data = JSON.parse(event.data);
                     if (data.type === 'tracking') {
                         updateOverlay(data);
+                    } else if (data.type === 'face_snapshot') {
+                        updateFaceSnapshot(data);
                     }
                 } catch (e) {
                     console.error('Error parsing message:', e);
@@ -196,8 +207,14 @@
                 el.label.textContent = `ID: ${person.id}`;
             });
 
-            // Update status
-            status.textContent = `Connected | ${persons.length} person(s)`;
+        }
+
+        function updateFaceSnapshot(data) {
+            if (!data.image) {
+                return;
+            }
+            faceSnapshotImg.src = data.image;
+            faceSnapshot.style.display = 'block';
         }
 
         // Handle window resize
