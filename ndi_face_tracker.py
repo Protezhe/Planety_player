@@ -602,6 +602,7 @@ class NDIFaceTracker:
         for index, snapshot in enumerate(top_snapshots):
             position = self.calculate_snapshot_position(index, total_count)
             snapshot["position"] = position
+            snapshot["position"]["index"] = index  # Add index for animation delay
             snapshot["planet"] = shuffled_planets[index] if index < len(shuffled_planets) else planets[index % len(planets)]
             print(f"Track ID {snapshot['track_id']}: position level={position['level']:.1f} side={position['side']}, planet={snapshot['planet']}, angle_deviation: {snapshot['angle_deviation']:.2f}°")
 

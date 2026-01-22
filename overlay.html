@@ -64,9 +64,9 @@
             padding: 5px 5px 5px 44px;
             box-shadow: 0 6px 22px rgba(0, 0, 0, 0.4);
             z-index: 1000;
-            transition: all 0.3s ease-out;
             min-width: 572px;
             height: 190px;
+            opacity: 0;
         }
 
         .hitparade-card.right-side {
@@ -100,6 +100,36 @@
             flex: 1;
             text-align: center;
             padding: 0 29px;
+        }
+
+        @keyframes slideInFromLeft {
+            from {
+                transform: translateX(-100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        @keyframes slideInFromRight {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        .hitparade-card.animate-left {
+            animation: slideInFromLeft 0.6s ease-out forwards;
+        }
+
+        .hitparade-card.animate-right {
+            animation: slideInFromRight 0.6s ease-out forwards;
         }
     </style>
 </head>
@@ -267,6 +297,7 @@
             data.snapshots.forEach(snapshot => {
                 const trackId = String(snapshot.track_id);
                 let card = snapshotElements.get(trackId);
+                const isNewCard = !card;
 
                 if (!card) {
                     // Create new hitparade card
@@ -312,6 +343,14 @@
                 card.style.top = `${pos.top}px`;
                 card.style.left = pos.left === 'auto' ? 'auto' : `${pos.left}px`;
                 card.style.right = pos.right === 'auto' ? 'auto' : `${pos.right}px`;
+
+                // Add animation for new cards
+                if (isNewCard && snapshot.position.index !== undefined) {
+                    const animationClass = snapshot.position.side === 'left' ? 'animate-left' : 'animate-right';
+                    const delay = snapshot.position.index * 0.5; // 500ms delay between cards
+                    card.style.animationDelay = `${delay}s`;
+                    card.classList.add(animationClass);
+                }
             });
         }
 
