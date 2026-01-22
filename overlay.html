@@ -54,10 +54,8 @@
             transition: all 0.1s ease-out;
         }
 
-        #face-snapshot {
+        .face-snapshot {
             position: fixed;
-            top: 40px;
-            left: 10px;
             width: 250px;
             height: 250px;
             border: 3px solid #00ff00;
@@ -67,42 +65,28 @@
             box-shadow: 0 0 15px rgba(0, 255, 0, 0.5),
                         0 0 30px rgba(0, 255, 0, 0.3);
             z-index: 1000;
+            transition: all 0.3s ease-out;
         }
 
-        #face-snapshot img {
+        .face-snapshot img {
             width: 100%;
             height: 100%;
             object-fit: cover;
         }
-
-        #face-snapshot-label {
-            position: fixed;
-            top: 240px;
-            left: 10px;
-            color: #00ff00;
-            font-family: 'Arial', sans-serif;
-            font-size: 11px;
-            background: rgba(0, 0, 0, 0.7);
-            padding: 3px 8px;
-            border-radius: 4px;
-            z-index: 1000;
-        }
     </style>
 </head>
 <body>
-    <div id="face-snapshot" style="display: none;"><img id="face-img" src="" alt="Face"></div>
-    <div id="face-snapshot-label" style="display: none;"></div>
+    <div id="snapshots-container"></div>
     <div id="overlay"></div>
 
     <script>
         const WS_URL = 'ws://localhost:8765';
         const overlay = document.getElementById('overlay');
-        const faceSnapshot = document.getElementById('face-snapshot');
-        const faceSnapshotImg = document.getElementById('face-img');
-        const faceSnapshotLabel = document.getElementById('face-snapshot-label');
+        const snapshotsContainer = document.getElementById('snapshots-container');
 
         let ws = null;
         let personElements = new Map();
+        let snapshotElements = new Map();
         let reconnectTimeout = null;
 
         function connect() {
@@ -137,8 +121,8 @@
                     const data = JSON.parse(event.data);
                     if (data.type === 'tracking') {
                         updateOverlay(data);
-                    } else if (data.type === 'face_snapshot') {
-                        updateFaceSnapshot(data);
+                    } else if (data.type === 'face_snapshots') {
+                        updateFaceSnapshots(data);
                     }
                 } catch (e) {
                     console.error('Error parsing message:', e);
@@ -210,12 +194,73 @@
 
         }
 
-        function updateFaceSnapshot(data) {
-            if (!data.image) {
+        function calculateSnapshotPosition(position) {
+            const SNAPSHOT_SIZE = 250; // px
+            const MARGIN = 10; // px from edge
+            const LEVEL_SPACING = 280; // px vertical spacing between levels
+
+            let top, left, right;
+
+            // Calculate vertical position based on level
+            // Level 0 = center, Level 1 = below center, Level 2 = further below, etc.
+            const centerY = window.innerHeight / 2;
+            top = centerY - (SNAPSHOT_SIZE / 2) + (position.level * LEVEL_SPACING);
+
+            // Calculate horizontal position based on side
+            if (position.side === 'left') {
+                left = MARGIN;
+                right = 'auto';
+            } else {
+                left = 'auto';
+                right = MARGIN;
+            }
+
+            return { top, left, right };
+        }
+
+        function updateFaceSnapshots(data) {
+            if (!data.snapshots || data.snapshots.length === 0) {
                 return;
             }
-            faceSnapshotImg.src = data.image;
-            faceSnapshot.style.display = 'block';
+
+            const currentIds = new Set(data.snapshots.map(s => String(s.track_id)));
+
+            // Remove snapshots that are no longer present
+            const toDelete = [];
+            snapshotElements.forEach((el, id) => {
+                if (!currentIds.has(id)) {
+                    el.remove();
+                    toDelete.push(id);
+                }
+            });
+            toDelete.forEach(id => snapshotElements.delete(id));
+
+            // Update or create snapshots
+            data.snapshots.forEach(snapshot => {
+                const trackId = String(snapshot.track_id);
+                let snapshotEl = snapshotElements.get(trackId);
+
+                if (!snapshotEl) {
+                    // Create new snapshot element
+                    snapshotEl = document.createElement('div');
+                    snapshotEl.className = 'face-snapshot';
+                    const img = document.createElement('img');
+                    img.alt = `Face ${trackId}`;
+                    snapshotEl.appendChild(img);
+                    snapshotsContainer.appendChild(snapshotEl);
+                    snapshotElements.set(trackId, snapshotEl);
+                }
+
+                // Update image
+                const img = snapshotEl.querySelector('img');
+                img.src = snapshot.image;
+
+                // Calculate and apply position
+                const pos = calculateSnapshotPosition(snapshot.position);
+                snapshotEl.style.top = `${pos.top}px`;
+                snapshotEl.style.left = pos.left === 'auto' ? 'auto' : `${pos.left}px`;
+                snapshotEl.style.right = pos.right === 'auto' ? 'auto' : `${pos.right}px`;
+            });
         }
 
         // Handle window resize

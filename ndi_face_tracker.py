@@ -286,7 +286,7 @@ class NDIFaceTracker:
 
     def __init__(self, source_name: str = "NDI_OBS", websocket_port: int = 8765,
                  yaw_threshold: float = 30.0, pitch_threshold: float = 30.0,
-                 min_face_size: int = 10):
+                 min_face_size: int = 10 ):
         self.source_name = source_name
         self.finder: Optional[Finder] = None
         self.receiver: Optional[Receiver] = None
@@ -443,6 +443,16 @@ class NDIFaceTracker:
         annotated_frame = self.draw_annotations(frame, looking_at_camera_ids)
         return annotated_frame
 
+    def calculate_snapshot_position(self, index: int) -> dict:
+        """
+        Calculate snapshot position based on index.
+        Pattern: center-left (0), center-right (1), down1-left (2), down1-right (3), down2-left (4), down2-right (5), etc.
+        Returns dict with level and side: {'level': 0, 'side': 'left'|'right'}
+        """
+        level = index // 2  # 0,0,1,1,2,2,3,3...
+        side = "left" if index % 2 == 0 else "right"
+        return {"level": level, "side": side}
+
     def send_tracking_data(self, visible_ids: set):
         """Send tracking data to WebSocket clients (only visible persons)."""
         if self.frame_width > 0 and self.frame_height > 0:
@@ -460,7 +470,7 @@ class NDIFaceTracker:
             self.ws_server.send(data)
 
     def capture_face_snapshot(self, frame: np.ndarray, visible_ids: set):
-        """Capture circular face snapshot every 10 seconds and send via WebSocket."""
+        """Capture circular face snapshots for all visible persons every 10 seconds and send via WebSocket."""
         current_time = time.time()
         if current_time - self.last_snapshot_time < self.snapshot_interval:
             return
@@ -468,59 +478,94 @@ class NDIFaceTracker:
         if not visible_ids:
             return
 
-        # Find first visible person
-        for track_id in visible_ids:
+        import math
+        snapshots = []
+
+        # Process all visible persons and verify face presence
+        for track_id in sorted(visible_ids):
             person = self.tracked_persons.get(track_id)
-            if person:
-                x1, y1, x2, y2 = person.bbox
-                cx, cy = person.center
-                # Calculate radius as half of circumscribed circle diameter + 20% padding
-                # Same formula as in overlay.html
-                import math
-                bbox_width = x2 - x1
-                bbox_height = y2 - y1
-                diameter = math.sqrt(bbox_width ** 2 + bbox_height ** 2) * 1.2
-                radius = int(diameter / 2)
+            if not person:
+                continue
 
-                # Calculate crop bounds with boundary checks
-                crop_x1 = max(0, cx - radius)
-                crop_y1 = max(0, cy - radius)
-                crop_x2 = min(self.frame_width, cx + radius)
-                crop_y2 = min(self.frame_height, cy + radius)
+            x1, y1, x2, y2 = person.bbox
+            cx, cy = person.center
+            # Calculate radius as half of circumscribed circle diameter + 20% padding
+            # Same formula as in overlay.html
+            bbox_width = x2 - x1
+            bbox_height = y2 - y1
+            diameter = math.sqrt(bbox_width ** 2 + bbox_height ** 2) * 1.2
+            radius = int(diameter / 2)
 
-                # Crop the region
-                cropped = frame[crop_y1:crop_y2, crop_x1:crop_x2].copy()
+            # Calculate crop bounds with boundary checks
+            crop_x1 = max(0, cx - radius)
+            crop_y1 = max(0, cy - radius)
+            crop_x2 = min(self.frame_width, cx + radius)
+            crop_y2 = min(self.frame_height, cy + radius)
 
-                if cropped.size == 0:
-                    continue
+            # Crop the region
+            cropped = frame[crop_y1:crop_y2, crop_x1:crop_x2].copy()
 
-                # Create circular mask
-                h, w = cropped.shape[:2]
-                mask = np.zeros((h, w), dtype=np.uint8)
-                center = (w // 2, h // 2)
-                mask_radius = min(w, h) // 2
-                cv2.circle(mask, center, mask_radius, 255, -1)
+            if cropped.size == 0:
+                continue
 
-                # Apply mask - create RGBA image with transparency
-                result = cv2.cvtColor(cropped, cv2.COLOR_BGR2BGRA)
-                result[:, :, 3] = mask
+            # Verify that face is actually present in cropped region
+            cropped_rgb = cv2.cvtColor(cropped, cv2.COLOR_BGR2RGB)
+            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=cropped_rgb)
+            face_results = self.head_pose_estimator.detector.detect(mp_image)
 
-                # Encode to PNG (supports transparency)
-                _, buffer = cv2.imencode('.png', result)
-                img_base64 = base64.b64encode(buffer).decode('utf-8')
+            if not face_results.face_landmarks or len(face_results.face_landmarks) == 0:
+                print(f"Skipping snapshot for track ID {track_id}: no face detected in cropped region")
+                continue
 
-                # Send snapshot via WebSocket
-                snapshot_data = {
-                    "type": "face_snapshot",
-                    "timestamp": current_time,
-                    "track_id": int(track_id),
-                    "image": f"data:image/png;base64,{img_base64}"
-                }
-                self.ws_server.send(snapshot_data)
+            # Create circular mask
+            h, w = cropped.shape[:2]
+            mask = np.zeros((h, w), dtype=np.uint8)
+            center = (w // 2, h // 2)
+            mask_radius = min(w, h) // 2
+            cv2.circle(mask, center, mask_radius, 255, -1)
 
-                self.last_snapshot_time = current_time
-                print(f"Face snapshot captured for track ID {track_id}, size: {w}x{h}, base64 len: {len(img_base64)}")
+            # Apply mask - create RGBA image with transparency
+            result = cv2.cvtColor(cropped, cv2.COLOR_BGR2BGRA)
+            result[:, :, 3] = mask
+
+            # Encode to PNG (supports transparency)
+            _, buffer = cv2.imencode('.png', result)
+            img_base64 = base64.b64encode(buffer).decode('utf-8')
+
+            # Calculate position for this snapshot (will be recalculated after limiting to 8)
+            snapshot = {
+                "track_id": int(track_id),
+                "image": f"data:image/png;base64,{img_base64}",
+                "cropped_size": (w, h)
+            }
+            snapshots.append(snapshot)
+
+            print(f"Face snapshot prepared for track ID {track_id}, size: {w}x{h}")
+
+            # Stop if we already have 8 valid snapshots
+            if len(snapshots) >= 8:
                 break
+
+        # Assign positions to snapshots
+        for index, snapshot in enumerate(snapshots):
+            position = self.calculate_snapshot_position(index)
+            snapshot["position"] = position
+            print(f"Track ID {snapshot['track_id']}: position level={position['level']} side={position['side']}")
+
+        # Send all snapshots via WebSocket
+        if snapshots:
+            # Remove temporary cropped_size field before sending
+            for snapshot in snapshots:
+                snapshot.pop("cropped_size", None)
+
+            snapshot_data = {
+                "type": "face_snapshots",
+                "timestamp": current_time,
+                "snapshots": snapshots
+            }
+            self.ws_server.send(snapshot_data)
+            self.last_snapshot_time = current_time
+            print(f"Sent {len(snapshots)} face snapshots")
 
     def draw_annotations(self, frame: np.ndarray, visible_ids: set) -> np.ndarray:
         """Return frame without annotations."""
