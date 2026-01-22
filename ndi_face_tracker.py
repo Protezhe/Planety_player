@@ -47,13 +47,14 @@ class HeadPoseEstimator:
 
         # 3D model points for head pose estimation
         # Order matches landmark_indices: [1, 152, 33, 263, 57, 287]
+        # X-axis inverted to match camera coordinate system
         self.model_points = np.array([
             (0.0, 0.0, 0.0),             # Nose tip
             (0.0, -330.0, -65.0),        # Chin
-            (225.0, 170.0, -135.0),      # Right eye (33)
-            (-225.0, 170.0, -135.0),     # Left eye (263)
-            (150.0, -150.0, -125.0),     # Right mouth corner (57)
-            (-150.0, -150.0, -125.0)     # Left mouth corner (287)
+            (-225.0, 170.0, -135.0),     # Right eye (33) - X inverted
+            (225.0, 170.0, -135.0),      # Left eye (263) - X inverted
+            (-150.0, -150.0, -125.0),    # Right mouth corner (57) - X inverted
+            (150.0, -150.0, -125.0)      # Left mouth corner (287) - X inverted
         ], dtype=np.float64)
 
     def get_head_pose(self, frame: np.ndarray, bbox: tuple) -> Optional[Tuple[float, float, float]]:
@@ -157,6 +158,17 @@ class HeadPoseEstimator:
         # Normalize to ±180° range
         if yaw_deg > 180:
             yaw_deg -= 360
+
+        # Invert pitch: positive = looking up, negative = looking down
+        pitch_deg = -pitch_deg
+
+        # Correct for coordinate system flip when roll is large (looking up/down)
+        # When abs(roll) > 90, the coordinate system can flip and yaw shifts by 180°
+        if abs(roll_deg) > 90 and abs(yaw_deg) > 90:
+            if yaw_deg > 0:
+                yaw_deg -= 180
+            else:
+                yaw_deg += 180
 
         return (yaw_deg, pitch_deg, roll_deg)
 
@@ -416,8 +428,13 @@ class NDIFaceTracker:
                     looking_at_camera = self.head_pose_estimator.is_looking_at_camera(
                         yaw, pitch, self.yaw_threshold, self.pitch_threshold
                     )
+                    # Debug: print angles for all detected faces
+                    look_status = "✓ LOOKING" if looking_at_camera else "✗ NOT LOOKING"
+                    print(f"  Track {track_id}: yaw={yaw:+.1f}° pitch={pitch:+.1f}° roll={roll:+.1f}° → {look_status}")
                     if looking_at_camera:
                         looking_at_camera_ids.add(track_id)
+                else:
+                    print(f"  Track {track_id}: ⚠ No head pose detected (landmarks not found)")
 
                 if track_id in self.tracked_persons:
                     self.tracked_persons[track_id].update(tuple(bbox), looking_at_camera, head_pose)
