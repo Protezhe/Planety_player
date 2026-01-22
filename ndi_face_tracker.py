@@ -8,6 +8,7 @@ import base64
 from dataclasses import dataclass, field
 from typing import Dict, Optional, Set
 from ultralytics import YOLO
+from huggingface_hub import hf_hub_download
 import websockets
 
 from cyndilib.wrapper.ndi_recv import RecvColorFormat
@@ -33,8 +34,12 @@ class TrackedPerson:
 
     def to_dict(self, frame_width: int, frame_height: int) -> dict:
         """Convert to dict with normalized coordinates (0-1)."""
+        import math
         x1, y1, x2, y2 = self.bbox
         cx, cy = self.center
+        # Calculate bbox dimensions
+        bbox_width = x2 - x1
+        bbox_height = y2 - y1
         return {
             "id": int(self.track_id),
             "bbox": {
@@ -42,12 +47,13 @@ class TrackedPerson:
                 "y1": y1 / frame_height,
                 "x2": x2 / frame_width,
                 "y2": y2 / frame_height,
+                "width": bbox_width / frame_width,
+                "height": bbox_height / frame_height,
             },
             "center": {
                 "x": cx / frame_width,
                 "y": cy / frame_height,
             },
-            "radius": max(x2 - x1, y2 - y1) / 2 / max(frame_width, frame_height),
         }
 
 
@@ -121,7 +127,12 @@ class NDIFaceTracker:
         self.receiver: Optional[Receiver] = None
         self.video_frame: Optional[VideoFrameSync] = None
         self.frame_sync = None
-        self.model = YOLO("yolov8n.pt")
+        # Load face detection model from HuggingFace
+        face_model_path = hf_hub_download(
+            repo_id="arnabdhar/YOLOv8-Face-Detection",
+            filename="model.pt"
+        )
+        self.model = YOLO(face_model_path)
         self.tracked_persons: Dict[int, TrackedPerson] = {}
         self.frame_width = 0
         self.frame_height = 0
@@ -199,7 +210,6 @@ class NDIFaceTracker:
         results = self.model.track(
             frame,
             persist=True,
-            classes=[0],
             verbose=False
         )
 
@@ -267,10 +277,13 @@ class NDIFaceTracker:
             if person:
                 x1, y1, x2, y2 = person.bbox
                 cx, cy = person.center
-                radius = max(x2 - x1, y2 - y1) // 2
-
-                # Add some padding
-                radius = int(radius * 1.2)
+                # Calculate radius as half of circumscribed circle diameter + 20% padding
+                # Same formula as in overlay.html
+                import math
+                bbox_width = x2 - x1
+                bbox_height = y2 - y1
+                diameter = math.sqrt(bbox_width ** 2 + bbox_height ** 2) * 1.2
+                radius = int(diameter / 2)
 
                 # Calculate crop bounds with boundary checks
                 crop_x1 = max(0, cx - radius)

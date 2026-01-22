@@ -58,8 +58,8 @@
             position: fixed;
             top: 40px;
             left: 10px;
-            width: 150px;
-            height: 150px;
+            width: 250px;
+            height: 250px;
             border: 3px solid #00ff00;
             border-radius: 50%;
             overflow: hidden;
@@ -77,7 +77,7 @@
 
         #face-snapshot-label {
             position: fixed;
-            top: 195px;
+            top: 240px;
             left: 10px;
             color: #00ff00;
             font-family: 'Arial', sans-serif;
@@ -190,10 +190,11 @@
                 const cx = person.center.x * viewWidth;
                 const cy = person.center.y * viewHeight;
 
-                // Calculate diameter from bbox
-                const bboxWidth = (person.bbox.x2 - person.bbox.x1) * viewWidth;
-                const bboxHeight = (person.bbox.y2 - person.bbox.y1) * viewHeight;
-                const diameter = Math.max(bboxWidth, bboxHeight);
+                // Calculate bbox dimensions
+                const bboxWidth = person.bbox.width * viewWidth;
+                const bboxHeight = person.bbox.height * viewHeight;
+                // Circle that circumscribes the face bbox (diameter = diagonal) + 20% padding
+                const diameter = Math.sqrt(bboxWidth * bboxWidth + bboxHeight * bboxHeight) * 1.2;
 
                 // Update circle position and size
                 el.circle.style.left = `${cx}px`;
