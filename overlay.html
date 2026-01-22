@@ -54,24 +54,52 @@
             transition: all 0.1s ease-out;
         }
 
-        .face-snapshot {
+        .hitparade-card {
             position: fixed;
-            width: 250px;
-            height: 250px;
-            border: 3px solid #00ff00;
+            display: flex;
+            flex-direction: row-reverse;
+            align-items: center;
+            background: linear-gradient(90deg, #9ACD32 0%, #A4D234 100%);
+            border-radius: 0 100px 100px 0;
+            padding: 5px 5px 5px 44px;
+            box-shadow: 0 6px 22px rgba(0, 0, 0, 0.4);
+            z-index: 1000;
+            transition: all 0.3s ease-out;
+            min-width: 572px;
+            height: 190px;
+        }
+
+        .hitparade-card.right-side {
+            flex-direction: row;
+            border-radius: 100px 0 0 100px;
+            padding: 5px 44px 5px 5px;
+        }
+
+        .hitparade-photo {
+            width: 180px;
+            height: 180px;
+            border: none;
             border-radius: 50%;
             overflow: hidden;
             background: rgba(0, 0, 0, 0.5);
-            box-shadow: 0 0 15px rgba(0, 255, 0, 0.5),
-                        0 0 30px rgba(0, 255, 0, 0.3);
-            z-index: 1000;
-            transition: all 0.3s ease-out;
+            flex-shrink: 0;
         }
 
-        .face-snapshot img {
+        .hitparade-photo img {
             width: 100%;
             height: 100%;
             object-fit: cover;
+        }
+
+        .hitparade-name {
+            color: #ffffff;
+            font-family: 'Arial', sans-serif;
+            font-size: 68px;
+            font-weight: bold;
+            text-shadow: 3px 3px 6px rgba(0, 0, 0, 0.3);
+            flex: 1;
+            text-align: center;
+            padding: 0 29px;
         }
     </style>
 </head>
@@ -195,16 +223,16 @@
         }
 
         function calculateSnapshotPosition(position) {
-            const SNAPSHOT_SIZE = 250; // px
-            const MARGIN = 10; // px from edge
-            const LEVEL_SPACING = 280; // px vertical spacing between levels
+            const CARD_HEIGHT = 190; // px
+            const MARGIN = 0; // px from edge
+            const LEVEL_SPACING = 210; // px vertical spacing between cards
 
             let top, left, right;
 
             // Calculate vertical position based on level
             // Level 0 = center, Level 1 = below center, Level 2 = further below, etc.
             const centerY = window.innerHeight / 2;
-            top = centerY - (SNAPSHOT_SIZE / 2) + (position.level * LEVEL_SPACING);
+            top = centerY - (CARD_HEIGHT / 2) + (position.level * LEVEL_SPACING);
 
             // Calculate horizontal position based on side
             if (position.side === 'left') {
@@ -227,9 +255,9 @@
 
             // Remove snapshots that are no longer present
             const toDelete = [];
-            snapshotElements.forEach((el, id) => {
+            snapshotElements.forEach((card, id) => {
                 if (!currentIds.has(id)) {
-                    el.remove();
+                    card.remove();
                     toDelete.push(id);
                 }
             });
@@ -238,28 +266,52 @@
             // Update or create snapshots
             data.snapshots.forEach(snapshot => {
                 const trackId = String(snapshot.track_id);
-                let snapshotEl = snapshotElements.get(trackId);
+                let card = snapshotElements.get(trackId);
 
-                if (!snapshotEl) {
-                    // Create new snapshot element
-                    snapshotEl = document.createElement('div');
-                    snapshotEl.className = 'face-snapshot';
+                if (!card) {
+                    // Create new hitparade card
+                    card = document.createElement('div');
+                    card.className = 'hitparade-card';
+
+                    // Create photo container
+                    const photoDiv = document.createElement('div');
+                    photoDiv.className = 'hitparade-photo';
                     const img = document.createElement('img');
                     img.alt = `Face ${trackId}`;
-                    snapshotEl.appendChild(img);
-                    snapshotsContainer.appendChild(snapshotEl);
-                    snapshotElements.set(trackId, snapshotEl);
+                    photoDiv.appendChild(img);
+
+                    // Create planet name
+                    const nameDiv = document.createElement('div');
+                    nameDiv.className = 'hitparade-name';
+
+                    // Add elements to card
+                    card.appendChild(photoDiv);
+                    card.appendChild(nameDiv);
+
+                    snapshotsContainer.appendChild(card);
+                    snapshotElements.set(trackId, card);
                 }
 
                 // Update image
-                const img = snapshotEl.querySelector('img');
+                const img = card.querySelector('.hitparade-photo img');
                 img.src = snapshot.image;
+
+                // Update planet name
+                const nameDiv = card.querySelector('.hitparade-name');
+                nameDiv.textContent = snapshot.planet || '';
+
+                // Set card direction based on side
+                if (snapshot.position.side === 'right') {
+                    card.classList.add('right-side');
+                } else {
+                    card.classList.remove('right-side');
+                }
 
                 // Calculate and apply position
                 const pos = calculateSnapshotPosition(snapshot.position);
-                snapshotEl.style.top = `${pos.top}px`;
-                snapshotEl.style.left = pos.left === 'auto' ? 'auto' : `${pos.left}px`;
-                snapshotEl.style.right = pos.right === 'auto' ? 'auto' : `${pos.right}px`;
+                card.style.top = `${pos.top}px`;
+                card.style.left = pos.left === 'auto' ? 'auto' : `${pos.left}px`;
+                card.style.right = pos.right === 'auto' ? 'auto' : `${pos.right}px`;
             });
         }
 

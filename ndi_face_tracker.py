@@ -5,6 +5,7 @@ import json
 import asyncio
 import threading
 import base64
+import random
 from dataclasses import dataclass, field
 from typing import Dict, Optional, Set, Tuple
 from ultralytics import YOLO
@@ -589,12 +590,20 @@ class NDIFaceTracker:
         snapshots.sort(key=lambda x: x["angle_deviation"])
         top_snapshots = snapshots[:8]
 
-        # Assign positions to top snapshots
+        # Planets of the Solar System (8 planets)
+        planets = ["Меркурий", "Венера", "Земля", "Марс", "Юпитер", "Сатурн", "Уран", "Нептун"]
+
+        # Shuffle planets and assign to snapshots
+        shuffled_planets = planets.copy()
+        random.shuffle(shuffled_planets)
+
+        # Assign positions and planets to top snapshots
         total_count = len(top_snapshots)
         for index, snapshot in enumerate(top_snapshots):
             position = self.calculate_snapshot_position(index, total_count)
             snapshot["position"] = position
-            print(f"Track ID {snapshot['track_id']}: position level={position['level']:.1f} side={position['side']}, angle_deviation: {snapshot['angle_deviation']:.2f}°")
+            snapshot["planet"] = shuffled_planets[index] if index < len(shuffled_planets) else planets[index % len(planets)]
+            print(f"Track ID {snapshot['track_id']}: position level={position['level']:.1f} side={position['side']}, planet={snapshot['planet']}, angle_deviation: {snapshot['angle_deviation']:.2f}°")
 
         # Send all snapshots via WebSocket
         if top_snapshots:
