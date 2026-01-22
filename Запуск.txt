@@ -1,2 +1,5 @@
 source venv/bin/activate
 python ndi_face_tracker.py
+
+windows
+venv/Scripts/python.exe ndi_face_tracker.py

@@ -4,3 +4,5 @@ ffpyplayer
 ultralytics
 cyndilib
 websockets
+mediapipe
+huggingface_hub
