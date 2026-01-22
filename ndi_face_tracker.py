@@ -12,6 +12,7 @@ from ultralytics import YOLO
 from huggingface_hub import hf_hub_download
 import websockets
 import mediapipe as mp
+import obsws_python as obs
 
 from cyndilib.wrapper.ndi_recv import RecvColorFormat
 from cyndilib.finder import Finder
@@ -233,6 +234,97 @@ class TrackedPerson:
         return data
 
 
+class OBSController:
+    """Control OBS via WebSocket."""
+
+    def __init__(self, host: str = "localhost", port: int = 4455, password: str = ""):
+        self.host = host
+        self.port = port
+        self.password = password
+        self.client: Optional[obs.ReqClient] = None
+        self._connected = False
+
+    def connect(self) -> bool:
+        """Connect to OBS WebSocket."""
+        try:
+            self.client = obs.ReqClient(host=self.host, port=self.port, password=self.password)
+            self._connected = True
+            print(f"✓ Connected to OBS WebSocket at {self.host}:{self.port}")
+            return True
+        except Exception as e:
+            print(f"✗ Failed to connect to OBS: {e}")
+            print("  Make sure OBS is running and WebSocket server is enabled")
+            print("  (Tools → WebSocket Server Settings)")
+            self._connected = False
+            return False
+
+    def switch_scene(self, scene_name: str) -> bool:
+        """Switch to a different scene."""
+        if not self._connected or not self.client:
+            print(f"✗ Cannot switch scene: not connected to OBS")
+            return False
+        try:
+            self.client.set_current_program_scene(scene_name)
+            print(f"✓ Switched to scene: {scene_name}")
+            return True
+        except Exception as e:
+            print(f"✗ Failed to switch scene to '{scene_name}': {e}")
+            return False
+
+    def get_current_scene(self) -> Optional[str]:
+        """Get current scene name."""
+        if not self._connected or not self.client:
+            return None
+        try:
+            response = self.client.get_current_program_scene()
+            return response.current_program_scene_name
+        except Exception as e:
+            print(f"✗ Failed to get current scene: {e}")
+            return None
+
+    def get_scene_list(self) -> list:
+        """Get list of all available scenes."""
+        if not self._connected or not self.client:
+            return []
+        try:
+            response = self.client.get_scene_list()
+            return [scene['sceneName'] for scene in response.scenes]
+        except Exception as e:
+            print(f"✗ Failed to get scene list: {e}")
+            return []
+
+    def set_preview_scene(self, scene_name: str) -> bool:
+        """Set preview scene (Studio Mode only)."""
+        if not self._connected or not self.client:
+            print(f"✗ Cannot set preview scene: not connected to OBS")
+            return False
+        try:
+            self.client.set_current_preview_scene('Камера')
+            print(f"✓ Set preview scene to: {scene_name}")
+            return True
+        except Exception as e:
+            print(f"✗ Failed to set preview scene to '{scene_name}': {e}")
+            return False
+
+    def get_studio_mode_enabled(self) -> bool:
+        """Check if Studio Mode is enabled."""
+        if not self._connected or not self.client:
+            return False
+        try:
+            response = self.client.get_studio_mode_enabled()
+            return response.studio_mode_enabled
+        except Exception as e:
+            print(f"✗ Failed to check studio mode: {e}")
+            return False
+
+    def disconnect(self):
+        """Disconnect from OBS."""
+        if self.client:
+            self.client.disconnect()
+            self._connected = False
+            print("✓ Disconnected from OBS")
+
+
 class WebSocketServer:
     """WebSocket server to broadcast tracking data."""
 
@@ -299,7 +391,8 @@ class NDIFaceTracker:
 
     def __init__(self, source_name: str = "NDI_OBS", websocket_port: int = 8765,
                  yaw_threshold: float = 30.0, pitch_threshold: float = 30.0,
-                 min_face_size: int = 10 ):
+                 min_face_size: int = 10,
+                 obs_host: str = "localhost", obs_port: int = 4455, obs_password: str = ""):
         self.source_name = source_name
         self.finder: Optional[Finder] = None
         self.receiver: Optional[Receiver] = None
@@ -324,9 +417,12 @@ class NDIFaceTracker:
         # WebSocket server
         self.ws_server = WebSocketServer(port=websocket_port)
 
-        # Face snapshot settings
-        self.last_snapshot_time = -10.0  # Start immediately
-        self.snapshot_interval = 10.0  # seconds
+        # OBS controller
+        self.obs = OBSController(host=obs_host, port=obs_port, password=obs_password)
+
+        # Face snapshot settings - DISABLED automatic snapshots
+        self.last_snapshot_time = 0.0
+        self.snapshot_interval = float('inf')  # Never trigger automatically
 
     def find_and_connect(self) -> bool:
         """Find NDI source and connect to it."""
@@ -428,13 +524,8 @@ class NDIFaceTracker:
                     looking_at_camera = self.head_pose_estimator.is_looking_at_camera(
                         yaw, pitch, self.yaw_threshold, self.pitch_threshold
                     )
-                    # Debug: print angles for all detected faces
-                    look_status = "✓ LOOKING" if looking_at_camera else "✗ NOT LOOKING"
-                    print(f"  Track {track_id}: yaw={yaw:+.1f}° pitch={pitch:+.1f}° roll={roll:+.1f}° → {look_status}")
                     if looking_at_camera:
                         looking_at_camera_ids.add(track_id)
-                else:
-                    print(f"  Track {track_id}: ⚠ No head pose detected (landmarks not found)")
 
                 if track_id in self.tracked_persons:
                     self.tracked_persons[track_id].update(tuple(bbox), looking_at_camera, head_pose)
@@ -522,8 +613,39 @@ class NDIFaceTracker:
             }
             self.ws_server.send(data)
 
+    def clear_overlay(self):
+        """Clear all snapshots from the overlay."""
+        data = {
+            "type": "clear_snapshots",
+            "timestamp": time.time()
+        }
+        self.ws_server.send(data)
+        print("✓ Sent clear overlay command")
+
+    def hide_snapshots_animated(self):
+        """Animate snapshots sliding off screen."""
+        data = {
+            "type": "hide_snapshots",
+            "timestamp": time.time()
+        }
+        self.ws_server.send(data)
+        print("✓ Sent hide snapshots animation command")
+
+    def trigger_snapshot(self, frame: np.ndarray):
+        """Manually trigger face snapshot capture for all people looking at camera."""
+        looking_at_camera_ids = set(
+            track_id for track_id, person in self.tracked_persons.items()
+            if person.looking_at_camera
+        )
+        if not looking_at_camera_ids:
+            print("⚠ No one is looking at camera - cannot take snapshot")
+            return False
+
+        self._capture_snapshot_internal(frame, looking_at_camera_ids)
+        return True
+
     def capture_face_snapshot(self, frame: np.ndarray, visible_ids: set):
-        """Capture circular face snapshots for all visible persons every 10 seconds and send via WebSocket."""
+        """Capture circular face snapshots for all visible persons (automatic timer-based)."""
         current_time = time.time()
         if current_time - self.last_snapshot_time < self.snapshot_interval:
             return
@@ -531,6 +653,11 @@ class NDIFaceTracker:
         if not visible_ids:
             return
 
+        self._capture_snapshot_internal(frame, visible_ids)
+
+    def _capture_snapshot_internal(self, frame: np.ndarray, visible_ids: set):
+        """Internal method to capture and send snapshots."""
+        current_time = time.time()
         import math
         snapshots = []
 
@@ -603,9 +730,39 @@ class NDIFaceTracker:
 
             print(f"Face snapshot prepared for track ID {track_id}, size: {w}x{h}, angle_deviation: {angle_deviation:.2f}°")
 
-        # Sort snapshots by angle deviation (ascending - smaller is better) and take top 8
+        # Sort snapshots by angle deviation (ascending - smaller is better)
         snapshots.sort(key=lambda x: x["angle_deviation"])
-        top_snapshots = snapshots[:8]
+
+        # Deduplicate: remove snapshots that are too close to each other (same person with different IDs)
+        def are_snapshots_duplicate(snap1, snap2, threshold=0.15):
+            """Check if two snapshots are likely the same person based on face position."""
+            person1 = self.tracked_persons.get(snap1["track_id"])
+            person2 = self.tracked_persons.get(snap2["track_id"])
+            if not person1 or not person2:
+                return False
+
+            # Calculate normalized distance between face centers
+            cx1, cy1 = person1.center
+            cx2, cy2 = person2.center
+            distance = math.sqrt((cx1 - cx2)**2 + (cy1 - cy2)**2)
+            normalized_distance = distance / math.sqrt(self.frame_width**2 + self.frame_height**2)
+
+            return normalized_distance < threshold
+
+        # Keep only unique people (remove duplicates)
+        unique_snapshots = []
+        for snapshot in snapshots:
+            is_duplicate = False
+            for unique_snap in unique_snapshots:
+                if are_snapshots_duplicate(snapshot, unique_snap):
+                    is_duplicate = True
+                    print(f"Skipping duplicate: Track {snapshot['track_id']} is too close to Track {unique_snap['track_id']}")
+                    break
+            if not is_duplicate:
+                unique_snapshots.append(snapshot)
+
+        # Take top 8 unique snapshots
+        top_snapshots = unique_snapshots[:8]
 
         # Planets of the Solar System (8 planets)
         planets = ["Меркурий", "Венера", "Земля", "Марс", "Юпитер", "Сатурн", "Уран", "Нептун"]
@@ -658,10 +815,57 @@ class NDIFaceTracker:
                     print(f"    Head pose: yaw={yaw:.1f}°, pitch={pitch:.1f}°, roll={roll:.1f}°")
             print("-----------------------\n")
 
+    def run_startup_sequence(self, target_scene: str = "2", preview_scene: str = "Распознавание"):
+        """Run startup sequence: switch scene → wait 5s → take photo → animate hide → switch to video."""
+        print("\n=== Starting Startup Sequence ===")
+
+        # Setup Studio Mode (if enabled)
+        if self.obs._connected:
+            # Show available scenes
+            scenes = self.obs.get_scene_list()
+            if scenes:
+                print(f"  Available scenes: {', '.join(scenes)}")
+
+            # Check if Studio Mode is enabled
+            studio_mode = self.obs.get_studio_mode_enabled()
+            if studio_mode:
+                print(f"  ℹ Studio Mode detected - fixing preview to '{preview_scene}'")
+                if preview_scene in scenes:
+                    self.obs.set_preview_scene(preview_scene)
+                else:
+                    print(f"  ⚠ Warning: Preview scene '{preview_scene}' not found!")
+
+        # Switch program scene to recognition
+        print(f"Switching program scene to '{target_scene}'...")
+        if self.obs._connected:
+            current_scene = self.obs.get_current_scene()
+            print(f"  Current program scene: {current_scene}")
+
+            if target_scene in scenes:
+                self.obs.switch_scene(target_scene)
+            else:
+                print(f"  ⚠ Warning: Scene '{target_scene}' not found in OBS!")
+                print(f"  Available scenes are: {scenes}")
+        else:
+            print("  ⚠ Warning: Not connected to OBS - cannot switch scene")
+        time.sleep(0.5)
+
+        # Mark time for 5-second delay before photo
+        self.startup_photo_time = time.time() + 5.0
+        self.startup_photo_taken = False
+        self.video_scene_switched = False
+        print("\nSequence:")
+        print("  → In 5s: Take photo")
+        print("  → In 10s: Animate snapshots hiding + switch to 'Видео' scene")
+        print("=== Startup Sequence Initiated ===\n")
+
     def run(self):
         """Main loop: receive frames, detect persons, display results."""
         # Start WebSocket server
         self.ws_server.start()
+
+        # Connect to OBS
+        self.obs.connect()
 
         if not self.find_and_connect():
             return
@@ -672,7 +876,8 @@ class NDIFaceTracker:
         print("Press 'q' to quit, 'p' to print coordinates")
         print(f"HTML overlay: file://{__file__.replace('ndi_face_tracker.py', 'overlay.html')}")
 
-        last_print_time = time.time()
+        # Run startup sequence
+        self.run_startup_sequence("Распознавание")
 
         try:
             while True:
@@ -690,9 +895,29 @@ class NDIFaceTracker:
 
                             annotated_frame = self.process_frame(frame)
 
-                            if time.time() - last_print_time > 2:
-                                self.print_coordinates()
-                                last_print_time = time.time()
+                            # Check if it's time for startup photo
+                            if hasattr(self, 'startup_photo_taken') and not self.startup_photo_taken:
+                                if time.time() >= self.startup_photo_time:
+                                    print("\n⏰ 5 seconds elapsed - triggering startup photo!")
+                                    if self.trigger_snapshot(frame):
+                                        print("✓ Startup photo captured successfully")
+                                        # Mark time for switching to "Видео" scene
+                                        self.video_scene_switch_time = time.time() + 5.0
+                                    self.startup_photo_taken = True
+
+                            # Check if it's time to hide snapshots
+                            if hasattr(self, 'video_scene_switched') and not self.video_scene_switched:
+                                if hasattr(self, 'video_scene_switch_time') and time.time() >= self.video_scene_switch_time:
+                                    if not hasattr(self, 'hide_animation_started'):
+                                        print("\n⏰ 5 seconds after photo - animating snapshots hide!")
+                                        self.hide_snapshots_animated()
+                                        self.hide_animation_started = True
+                                        self.hide_animation_complete_time = time.time() + 1.0  # Wait 1s for animation
+                                    elif time.time() >= self.hide_animation_complete_time:
+                                        print("Switching to 'Видео' scene!")
+                                        if self.obs._connected:
+                                            self.obs.switch_scene("Видео")
+                                        self.video_scene_switched = True
 
                             cv2.imshow("NDI Face Tracker", annotated_frame)
 
@@ -710,6 +935,7 @@ class NDIFaceTracker:
         finally:
             cv2.destroyAllWindows()
             self.ws_server.stop()
+            self.obs.disconnect()
             if self.receiver:
                 self.receiver.disconnect()
             if self.finder:
@@ -717,5 +943,11 @@ class NDIFaceTracker:
 
 
 if __name__ == "__main__":
-    tracker = NDIFaceTracker(source_name="NDI_OBS")
+    # If OBS has authentication enabled, set your password here
+    OBS_PASSWORD = ""  # Change to your OBS WebSocket password if needed
+
+    tracker = NDIFaceTracker(
+        source_name="NDI_OBS",
+        obs_password=OBS_PASSWORD
+    )
     tracker.run()

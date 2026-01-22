@@ -124,12 +124,42 @@
             }
         }
 
+        @keyframes slideOutToLeft {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateX(-120%);
+                opacity: 0;
+            }
+        }
+
+        @keyframes slideOutToRight {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateX(120%);
+                opacity: 0;
+            }
+        }
+
         .hitparade-card.animate-left {
             animation: slideInFromLeft 0.6s ease-out forwards;
         }
 
         .hitparade-card.animate-right {
             animation: slideInFromRight 0.6s ease-out forwards;
+        }
+
+        .hitparade-card.hide-left {
+            animation: slideOutToLeft 0.8s ease-in forwards;
+        }
+
+        .hitparade-card.hide-right {
+            animation: slideOutToRight 0.8s ease-in forwards;
         }
     </style>
 </head>
@@ -181,6 +211,10 @@
                         updateOverlay(data);
                     } else if (data.type === 'face_snapshots') {
                         updateFaceSnapshots(data);
+                    } else if (data.type === 'clear_snapshots') {
+                        clearAllSnapshots();
+                    } else if (data.type === 'hide_snapshots') {
+                        hideAllSnapshotsAnimated();
                     }
                 } catch (e) {
                     console.error('Error parsing message:', e);
@@ -274,6 +308,38 @@
             }
 
             return { top, left, right };
+        }
+
+        function clearAllSnapshots() {
+            console.log('Clearing all snapshots from overlay');
+            // Remove all snapshot cards
+            snapshotElements.forEach((card) => {
+                card.remove();
+            });
+            snapshotElements.clear();
+        }
+
+        function hideAllSnapshotsAnimated() {
+            console.log('Hiding all snapshots with animation');
+            // Animate each card sliding off screen based on its side
+            snapshotElements.forEach((card) => {
+                // Determine which side the card is on
+                const isRightSide = card.classList.contains('right-side');
+                const animationClass = isRightSide ? 'hide-right' : 'hide-left';
+
+                // Add animation class
+                card.classList.add(animationClass);
+
+                // Remove card after animation completes (800ms)
+                setTimeout(() => {
+                    card.remove();
+                }, 800);
+            });
+
+            // Clear the map after animations complete
+            setTimeout(() => {
+                snapshotElements.clear();
+            }, 800);
         }
 
         function updateFaceSnapshots(data) {
