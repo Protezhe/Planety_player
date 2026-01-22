@@ -443,14 +443,49 @@ class NDIFaceTracker:
         annotated_frame = self.draw_annotations(frame, looking_at_camera_ids)
         return annotated_frame
 
-    def calculate_snapshot_position(self, index: int) -> dict:
+    def calculate_head_angle_deviation(self, yaw: float, pitch: float) -> float:
         """
-        Calculate snapshot position based on index.
-        Pattern: center-left (0), center-right (1), down1-left (2), down1-right (3), down2-left (4), down2-right (5), etc.
-        Returns dict with level and side: {'level': 0, 'side': 'left'|'right'}
+        Calculate total head angle deviation from direct camera gaze.
+        Lower value = looking more directly at camera.
         """
-        level = index // 2  # 0,0,1,1,2,2,3,3...
+        import math
+        # Calculate Euclidean distance from (0, 0) - perfect camera gaze
+        deviation = math.sqrt(yaw**2 + pitch**2)
+        return deviation
+
+    def calculate_snapshot_position(self, index: int, total_count: int) -> dict:
+        """
+        Calculate snapshot position based on index and total count.
+        Pattern: center-left (0), center-right (1), down1-left (2), down1-right (3), etc.
+        Positions are centered vertically based on total count.
+        Returns dict with level and side: {'level': 0.0, 'side': 'left'|'right'}
+        """
+        import math
+
         side = "left" if index % 2 == 0 else "right"
+
+        # Count photos on each side
+        left_count = math.ceil(total_count / 2)
+        right_count = math.floor(total_count / 2)
+
+        # Calculate maximum level (highest photo position)
+        max_left_level = left_count - 1
+        max_right_level = right_count - 1
+        max_level = max(max_left_level, max_right_level)
+
+        # Calculate level within each side (0, 1, 2, 3...)
+        if side == "left":
+            side_index = index // 2
+            raw_level = float(side_index)
+        else:
+            side_index = index // 2
+            # Apply vertical offset to center right side relative to left side
+            offset = (left_count - right_count) / 2.0
+            raw_level = float(side_index) + offset
+
+        # Center the entire group vertically by shifting based on max_level
+        level = raw_level - (max_level / 2.0)
+
         return {"level": level, "side": side}
 
     def send_tracking_data(self, visible_ids: set):
@@ -517,6 +552,14 @@ class NDIFaceTracker:
                 print(f"Skipping snapshot for track ID {track_id}: no face detected in cropped region")
                 continue
 
+            # Calculate head angle deviation (lower = looking more directly at camera)
+            if person.head_pose is None:
+                print(f"Skipping snapshot for track ID {track_id}: no head pose data")
+                continue
+
+            yaw, pitch, roll = person.head_pose
+            angle_deviation = self.calculate_head_angle_deviation(yaw, pitch)
+
             # Create circular mask
             h, w = cropped.shape[:2]
             mask = np.zeros((h, w), dtype=np.uint8)
@@ -532,40 +575,42 @@ class NDIFaceTracker:
             _, buffer = cv2.imencode('.png', result)
             img_base64 = base64.b64encode(buffer).decode('utf-8')
 
-            # Calculate position for this snapshot (will be recalculated after limiting to 8)
             snapshot = {
                 "track_id": int(track_id),
                 "image": f"data:image/png;base64,{img_base64}",
+                "angle_deviation": angle_deviation,
                 "cropped_size": (w, h)
             }
             snapshots.append(snapshot)
 
-            print(f"Face snapshot prepared for track ID {track_id}, size: {w}x{h}")
+            print(f"Face snapshot prepared for track ID {track_id}, size: {w}x{h}, angle_deviation: {angle_deviation:.2f}°")
 
-            # Stop if we already have 8 valid snapshots
-            if len(snapshots) >= 8:
-                break
+        # Sort snapshots by angle deviation (ascending - smaller is better) and take top 8
+        snapshots.sort(key=lambda x: x["angle_deviation"])
+        top_snapshots = snapshots[:8]
 
-        # Assign positions to snapshots
-        for index, snapshot in enumerate(snapshots):
-            position = self.calculate_snapshot_position(index)
+        # Assign positions to top snapshots
+        total_count = len(top_snapshots)
+        for index, snapshot in enumerate(top_snapshots):
+            position = self.calculate_snapshot_position(index, total_count)
             snapshot["position"] = position
-            print(f"Track ID {snapshot['track_id']}: position level={position['level']} side={position['side']}")
+            print(f"Track ID {snapshot['track_id']}: position level={position['level']:.1f} side={position['side']}, angle_deviation: {snapshot['angle_deviation']:.2f}°")
 
         # Send all snapshots via WebSocket
-        if snapshots:
-            # Remove temporary cropped_size field before sending
-            for snapshot in snapshots:
+        if top_snapshots:
+            # Remove temporary fields before sending
+            for snapshot in top_snapshots:
+                snapshot.pop("angle_deviation", None)
                 snapshot.pop("cropped_size", None)
 
             snapshot_data = {
                 "type": "face_snapshots",
                 "timestamp": current_time,
-                "snapshots": snapshots
+                "snapshots": top_snapshots
             }
             self.ws_server.send(snapshot_data)
             self.last_snapshot_time = current_time
-            print(f"Sent {len(snapshots)} face snapshots")
+            print(f"Sent {len(top_snapshots)} face snapshots (selected from {len(snapshots)} total)")
 
     def draw_annotations(self, frame: np.ndarray, visible_ids: set) -> np.ndarray:
         """Return frame without annotations."""
