@@ -378,14 +378,19 @@ class NDIFaceTracker:
                 )
                 continue
 
-            if person.head_pose is None:
-                print(f"Skipping snapshot for track ID {track_id}: no head pose data")
+            h, w = cropped.shape[:2]
+            snapshot_head_pose = self.head_pose_estimator.get_head_pose(
+                cropped, (0, 0, w, h)
+            )
+            if snapshot_head_pose is None:
+                print(
+                    f"Skipping snapshot for track ID {track_id}: no head pose data in snapshot"
+                )
                 continue
 
-            yaw, pitch, _roll = person.head_pose
+            yaw, pitch, _roll = snapshot_head_pose
             angle_deviation = self.calculate_head_angle_deviation(yaw, pitch)
 
-            h, w = cropped.shape[:2]
             mask = np.zeros((h, w), dtype=np.uint8)
             center = (w // 2, h // 2)
             mask_radius = min(w, h) // 2
