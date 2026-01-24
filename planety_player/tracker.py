@@ -82,6 +82,7 @@ class NDIFaceTracker:
     """NDI stream receiver with face detection and tracking."""
 
     TRACK_TIMEOUT = 60.0
+    MIN_OVERLAY_HEIGHT_RATIO = 0.10
 
     def __init__(self, config: AppConfig):
         self.config = config
@@ -231,8 +232,13 @@ class NDIFaceTracker:
                             f"  Head pose: yaw={yaw:.1f}°, pitch={pitch:.1f}°, roll={roll:.1f}°"
                         )
 
-        self.send_tracking_data(looking_at_camera_ids)
-        self.capture_face_snapshot(frame, looking_at_camera_ids)
+        visible_ids = {
+            track_id
+            for track_id in looking_at_camera_ids
+            if self._is_large_enough(self.tracked_persons.get(track_id))
+        }
+        self.send_tracking_data(visible_ids)
+        self.capture_face_snapshot(frame, visible_ids)
 
         annotated_frame = self.draw_annotations(frame, looking_at_camera_ids)
         return annotated_frame
@@ -272,6 +278,16 @@ class NDIFaceTracker:
 
         return {"level": level, "side": side}
 
+    def _is_large_enough(self, person: Optional[TrackedPerson]) -> bool:
+        if person is None or self.frame_width <= 0 or self.frame_height <= 0:
+            return False
+        x1, y1, x2, y2 = person.bbox
+        bbox_width = x2 - x1
+        bbox_height = y2 - y1
+        if bbox_width <= 0 or bbox_height <= 0:
+            return False
+        return (bbox_height / self.frame_height) >= self.MIN_OVERLAY_HEIGHT_RATIO
+
     def send_tracking_data(self, visible_ids: set):
         """Send tracking data to WebSocket clients (only visible persons)."""
         if self.frame_width > 0 and self.frame_height > 0:
@@ -305,7 +321,7 @@ class NDIFaceTracker:
         looking_at_camera_ids = {
             track_id
             for track_id, person in self.tracked_persons.items()
-            if person.looking_at_camera
+            if person.looking_at_camera and self._is_large_enough(person)
         }
         if not looking_at_camera_ids:
             print("⚠ No one is looking at camera - cannot take snapshot")
@@ -416,7 +432,7 @@ class NDIFaceTracker:
         for snapshot in snapshots:
             is_duplicate = False
             for unique_snap in unique_snapshots:
-                if are_snapshots_duplicate(snapshot, unique_snap):
+                if are_snapshots_duplicate(snapshot, unique_snap, threshold=0.05):
                     is_duplicate = True
                     print(
                         f"Skipping duplicate: Track {snapshot['track_id']} is too close to "

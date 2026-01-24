@@ -176,6 +176,7 @@
         let personElements = new Map();
         let snapshotElements = new Map();
         let reconnectTimeout = null;
+        let isHidingSnapshots = false;
 
         function connect() {
             if (ws && ws.readyState === WebSocket.OPEN) return;
@@ -321,6 +322,10 @@
 
         function hideAllSnapshotsAnimated() {
             console.log('Hiding all snapshots with animation');
+            if (isHidingSnapshots) {
+                return;
+            }
+            isHidingSnapshots = true;
             // Animate each card sliding off screen based on its side
             snapshotElements.forEach((card) => {
                 // Determine which side the card is on
@@ -328,6 +333,8 @@
                 const animationClass = isRightSide ? 'hide-right' : 'hide-left';
 
                 // Add animation class
+                card.classList.remove('animate-left', 'animate-right');
+                card.style.animationDelay = '0s';
                 card.classList.add(animationClass);
 
                 // Remove card after animation completes (800ms)
@@ -339,10 +346,14 @@
             // Clear the map after animations complete
             setTimeout(() => {
                 snapshotElements.clear();
+                isHidingSnapshots = false;
             }, 800);
         }
 
         function updateFaceSnapshots(data) {
+            if (isHidingSnapshots) {
+                return;
+            }
             if (!data.snapshots || data.snapshots.length === 0) {
                 return;
             }

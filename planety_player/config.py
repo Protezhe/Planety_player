@@ -29,4 +29,4 @@ class AppConfig:
     cycle_enabled: bool = True
     cycle_interval_sec: float = 30.0
     cycle_photo_delay_sec: float = 6.0
-    cycle_hide_delay_sec: float = 5.0
+    cycle_hide_delay_sec: float = 10.0
