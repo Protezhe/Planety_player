@@ -174,6 +174,18 @@
             '#6BCB77', // green
         ];
 
+        // Card gradients from red to violet (vertical, subtle)
+        const CARD_GRADIENTS = [
+            'linear-gradient(180deg, #ef4444 0%, #dc2626 100%)', // red
+            'linear-gradient(180deg, #f97316 0%, #ea580c 100%)', // orange
+            'linear-gradient(180deg, #eab308 0%, #ca8a04 100%)', // yellow
+            'linear-gradient(180deg, #22c55e 0%, #16a34a 100%)', // green
+            'linear-gradient(180deg, #06b6d4 0%, #0891b2 100%)', // cyan
+            'linear-gradient(180deg, #3b82f6 0%, #2563eb 100%)', // blue
+            'linear-gradient(180deg, #8b5cf6 0%, #7c3aed 100%)', // violet
+            'linear-gradient(180deg, #a855f7 0%, #9333ea 100%)', // purple
+        ];
+
         function connect() {
             if (ws && ws.readyState === WebSocket.OPEN) return;
 
@@ -431,12 +443,16 @@
                 card.style.left = pos.left === 'auto' ? 'auto' : `${pos.left}px`;
                 card.style.right = pos.right === 'auto' ? 'auto' : `${pos.right}px`;
 
-                // Add animation for new cards
+                // Add animation and color for new cards
                 if (isNewCard && snapshot.position.index !== undefined) {
                     const animationClass = snapshot.position.side === 'left' ? 'animate-left' : 'animate-right';
                     const delay = snapshot.position.index * 0.5; // 500ms delay between cards
                     card.style.animationDelay = `${delay}s`;
                     card.classList.add(animationClass);
+
+                    // Assign gradient based on index
+                    const gradientIndex = snapshot.position.index % CARD_GRADIENTS.length;
+                    card.style.background = CARD_GRADIENTS[gradientIndex];
                 }
             });
         }
