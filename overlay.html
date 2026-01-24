@@ -162,28 +162,34 @@
         let circlesHidden = false;
 
         const CIRCLE_COLORS = [
-            '#FF6B6B', // red
-            '#4ECDC4', // teal
-            '#FFE66D', // yellow
-            '#95E1D3', // mint
-            '#F38181', // coral
-            '#AA96DA', // lavender
-            '#FCBAD3', // pink
-            '#A8D8EA', // sky blue
-            '#FF9F43', // orange
-            '#6BCB77', // green
+            '#FFD700', // bright yellow (Earth)
+            '#FF5500', // bright orange (Mercury)
+            '#00DD00', // bright green (Venus)
+            '#00AAFF', // bright blue (Uranus)
+            '#00DDDD', // bright cyan (Neptune)
+            '#FF44CC', // bright pink (Saturn)
+            '#FF2222', // bright red (Mars)
+            '#AA44FF', // bright violet (Pluto)
+            '#FFAA00', // bright orange (Jupiter)
+            '#FFEE00', // bright yellow (Sun)
         ];
 
-        // Card gradients from red to violet (vertical, subtle)
-        const CARD_GRADIENTS = [
-            'linear-gradient(180deg, #ef4444 0%, #dc2626 100%)', // red
-            'linear-gradient(180deg, #f97316 0%, #ea580c 100%)', // orange
-            'linear-gradient(180deg, #eab308 0%, #ca8a04 100%)', // yellow
-            'linear-gradient(180deg, #22c55e 0%, #16a34a 100%)', // green
-            'linear-gradient(180deg, #06b6d4 0%, #0891b2 100%)', // cyan
-            'linear-gradient(180deg, #3b82f6 0%, #2563eb 100%)', // blue
-            'linear-gradient(180deg, #8b5cf6 0%, #7c3aed 100%)', // violet
-            'linear-gradient(180deg, #a855f7 0%, #9333ea 100%)', // purple
+        // Left side gradients (saturated)
+        const LEFT_GRADIENTS = [
+            'linear-gradient(180deg, #FFE033 0%, #FF9500 100%)',
+            'linear-gradient(180deg, #44DD44 0%, #00CC44 100%)',
+            'linear-gradient(180deg, #33CCDD 0%, #0099FF 100%)',
+            'linear-gradient(180deg, #FF3333 0%, #FF5555 100%)',
+            'linear-gradient(180deg, #FFAA00 0%, #DD7700 100%)',
+        ];
+
+        // Right side gradients (saturated)
+        const RIGHT_GRADIENTS = [
+            'linear-gradient(180deg, #FF5500 0%, #FF7744 100%)',
+            'linear-gradient(180deg, #33AAFF 0%, #55BBFF 100%)',
+            'linear-gradient(180deg, #FF44DD 0%, #FF66EE 100%)',
+            'linear-gradient(180deg, #AA44FF 0%, #CC66FF 100%)',
+            'linear-gradient(180deg, #FFDD00 0%, #FFEE44 100%)',
         ];
 
         function connect() {
@@ -450,9 +456,13 @@
                     card.style.animationDelay = `${delay}s`;
                     card.classList.add(animationClass);
 
-                    // Assign gradient based on index
-                    const gradientIndex = snapshot.position.index % CARD_GRADIENTS.length;
-                    card.style.background = CARD_GRADIENTS[gradientIndex];
+                    // Assign gradient based on side and position
+                    const sideIndex = Math.floor(snapshot.position.index / 2);
+                    if (snapshot.position.side === 'left') {
+                        card.style.background = LEFT_GRADIENTS[sideIndex % LEFT_GRADIENTS.length];
+                    } else {
+                        card.style.background = RIGHT_GRADIENTS[sideIndex % RIGHT_GRADIENTS.length];
+                    }
                 }
             });
         }
