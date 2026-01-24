@@ -316,6 +316,18 @@ class NDIFaceTracker:
         self.ws_server.send(data)
         print("✓ Sent hide snapshots animation command")
 
+    def hide_circles(self):
+        """Hide tracking circles from overlay."""
+        data = {"type": "hide_circles", "timestamp": time.time()}
+        self.ws_server.send(data)
+        print("✓ Sent hide circles command")
+
+    def show_circles(self):
+        """Show tracking circles on overlay."""
+        data = {"type": "show_circles", "timestamp": time.time()}
+        self.ws_server.send(data)
+        print("✓ Sent show circles command")
+
     def trigger_snapshot(self, frame: np.ndarray):
         """Manually trigger face snapshot capture for all people looking at camera."""
         looking_at_camera_ids = {
@@ -521,6 +533,9 @@ class NDIFaceTracker:
         """Run cycle sequence: preview → program scene → photo → hide → video."""
         print("\n=== Starting Cycle Sequence ===")
 
+        self.show_circles()
+        self.clear_overlay()
+
         scenes = []
         if self.obs._connected:
             scenes = self.obs.get_scene_list()
@@ -624,6 +639,10 @@ class NDIFaceTracker:
                                 print("\n⏰ Cycle photo time reached - triggering photo!")
                                 if self.trigger_snapshot(frame):
                                     print("✓ Cycle photo captured successfully")
+                                    self.hide_circles()
+                                    if self.obs._connected:
+                                        print(f"Switching to '{self.config.mission_scene_name}' scene!")
+                                        self.obs.switch_scene(self.config.mission_scene_name)
                                 self.cycle_photo_taken = True
 
                             if (

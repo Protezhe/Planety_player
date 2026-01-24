@@ -24,6 +24,7 @@ class AppConfig:
 
     startup_target_scene: str = "Распознавание"
     startup_preview_scene: str = "Камера"
+    mission_scene_name: str = "Состав миссии"
     video_scene_name: str = "Видео"
 
     cycle_enabled: bool = True

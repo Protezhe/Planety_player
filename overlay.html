@@ -33,25 +33,6 @@
             border-radius: 50%;
             transform: translate(-50%, -50%);
             transition: all 0.1s ease-out;
-            box-shadow: 0 0 10px rgba(0, 255, 0, 0.5),
-                        0 0 20px rgba(0, 255, 0, 0.3),
-                        inset 0 0 10px rgba(0, 255, 0, 0.1);
-        }
-
-        .person-label {
-            position: absolute;
-            transform: translate(-50%, -100%);
-            color: #00ff00;
-            font-family: 'Arial', sans-serif;
-            font-size: 14px;
-            font-weight: bold;
-            text-shadow: 0 0 5px rgba(0, 0, 0, 0.8),
-                         0 0 10px rgba(0, 255, 0, 0.5);
-            white-space: nowrap;
-            padding: 2px 8px;
-            background: rgba(0, 0, 0, 0.5);
-            border-radius: 4px;
-            transition: all 0.1s ease-out;
         }
 
         .hitparade-card {
@@ -59,12 +40,13 @@
             display: flex;
             flex-direction: row-reverse;
             align-items: center;
-            background: linear-gradient(90deg, #9ACD32 0%, #A4D234 100%);
+            background: linear-gradient(90deg, #4f46e5 0%, #7c3aed 50%, #c026d3 100%);
             border-radius: 0 100px 100px 0;
-            padding: 5px 5px 5px 44px;
-            box-shadow: 0 6px 22px rgba(0, 0, 0, 0.4);
+            padding: 5px 5px 5px 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5),
+                        0 16px 48px rgba(0, 0, 0, 0.3);
             z-index: 1000;
-            min-width: 572px;
+            min-width: 460px;
             height: 190px;
             opacity: 0;
         }
@@ -72,7 +54,7 @@
         .hitparade-card.right-side {
             flex-direction: row;
             border-radius: 100px 0 0 100px;
-            padding: 5px 44px 5px 5px;
+            padding: 5px 20px 5px 5px;
         }
 
         .hitparade-photo {
@@ -99,7 +81,7 @@
             text-shadow: 3px 3px 6px rgba(0, 0, 0, 0.3);
             flex: 1;
             text-align: center;
-            padding: 0 29px;
+            padding: 0 15px;
         }
 
         @keyframes slideInFromLeft {
@@ -177,6 +159,20 @@
         let snapshotElements = new Map();
         let reconnectTimeout = null;
         let isHidingSnapshots = false;
+        let circlesHidden = false;
+
+        const CIRCLE_COLORS = [
+            '#FF6B6B', // red
+            '#4ECDC4', // teal
+            '#FFE66D', // yellow
+            '#95E1D3', // mint
+            '#F38181', // coral
+            '#AA96DA', // lavender
+            '#FCBAD3', // pink
+            '#A8D8EA', // sky blue
+            '#FF9F43', // orange
+            '#6BCB77', // green
+        ];
 
         function connect() {
             if (ws && ws.readyState === WebSocket.OPEN) return;
@@ -193,7 +189,6 @@
                 // Clear all circles on disconnect
                 personElements.forEach((el) => {
                     el.circle.remove();
-                    el.label.remove();
                 });
                 personElements.clear();
 
@@ -216,6 +211,10 @@
                         clearAllSnapshots();
                     } else if (data.type === 'hide_snapshots') {
                         hideAllSnapshotsAnimated();
+                    } else if (data.type === 'hide_circles') {
+                        hideAllCircles();
+                    } else if (data.type === 'show_circles') {
+                        showCircles();
                     }
                 } catch (e) {
                     console.error('Error parsing message:', e);
@@ -224,6 +223,8 @@
         }
 
         function updateOverlay(data) {
+            if (circlesHidden) return;
+
             const persons = data.persons || [];
             const currentIds = new Set(persons.map(p => String(p.id)));
 
@@ -232,31 +233,30 @@
             personElements.forEach((el, id) => {
                 if (!currentIds.has(id)) {
                     el.circle.remove();
-                    el.label.remove();
                     toDelete.push(id);
                 }
             });
             toDelete.forEach(id => personElements.delete(id));
 
             // Update or create elements for each person
-            persons.forEach(person => {
+            persons.forEach((person, index) => {
                 const personId = String(person.id);
                 let el = personElements.get(personId);
 
                 if (!el) {
-                    // Create new elements
+                    // Create new circle element
                     const circle = document.createElement('div');
                     circle.className = 'person-circle';
                     circle.dataset.personId = personId;
 
-                    const label = document.createElement('div');
-                    label.className = 'person-label';
-                    label.dataset.personId = personId;
+                    // Assign color based on person ID
+                    const colorIndex = person.id % CIRCLE_COLORS.length;
+                    const color = CIRCLE_COLORS[colorIndex];
+                    circle.style.borderColor = color;
 
                     overlay.appendChild(circle);
-                    overlay.appendChild(label);
 
-                    el = { circle, label };
+                    el = { circle };
                     personElements.set(personId, el);
                 }
 
@@ -278,11 +278,6 @@
                 el.circle.style.top = `${cy}px`;
                 el.circle.style.width = `${diameter}px`;
                 el.circle.style.height = `${diameter}px`;
-
-                // Update label position
-                el.label.style.left = `${cx}px`;
-                el.label.style.top = `${cy - diameter / 2 - 5}px`;
-                el.label.textContent = `ID: ${person.id}`;
             });
 
         }
@@ -318,6 +313,21 @@
                 card.remove();
             });
             snapshotElements.clear();
+        }
+
+        function hideAllCircles() {
+            console.log('Hiding all tracking circles');
+            circlesHidden = true;
+            // Remove all person circles
+            personElements.forEach((el) => {
+                el.circle.remove();
+            });
+            personElements.clear();
+        }
+
+        function showCircles() {
+            console.log('Enabling tracking circles');
+            circlesHidden = false;
         }
 
         function hideAllSnapshotsAnimated() {
